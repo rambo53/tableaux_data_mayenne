@@ -63,6 +63,10 @@ Sub refresh_data_dia()
 		
 		' validation toutes les colonnes issues de DIA dans les templates sont biens présentes dans le fichier extrait de dia
 		ContientTousLesElements HeadersDiaList, HeadersDiaFile
+		
+		' ajout des noms de colonnes de chaque fichiers dans le "DictPrincipal" sous la clée "headers_file"
+		AjouterEntetesAuDictionnaire DictPrincipal, CheminFilesTemplates, Cle, "headers_file"
+
 		Application.ScreenUpdating = True
 	Next Cle
 
@@ -101,6 +105,8 @@ Sub refresh_data_dia()
 			
 			' Création des dossiers des collaborateurs
 			Dim DirectoryForEachCollaborateurType As String
+			Dim FilesTemplate() As String
+			Dim NameFilesTemplate() As String
 			For Each DirectoryToCreate In DirectoriesToCreate
 				DirectoryForEachCollaborateurType = GetCheminEnfant(CleanDirectory, Cle)
 				CreerDossier DirectoryForEachCollaborateurType, DirectoryToCreate
@@ -108,6 +114,22 @@ Sub refresh_data_dia()
 				' intégration des fichier depuis le dossier template pour chaque catégorie de collaborateur
 				DirectoryForEachCollaborateurType = GetCheminEnfant(DirectoryForEachCollaborateurType, DirectoryToCreate)
 				CopierTousLesFichiers DictPrincipal("path_templates")("directory_in_templates")(Cle)("path"), DirectoryForEachCollaborateurType
+				
+				' DirectoryToCreate = nom collab'
+				' Cle = Data Analyste
+				' DirectoryForEachCollaborateurType = chemin complet pour récupérer fichiers templates
+				' NameFilesTemplate= le nom des fichiers sans extension pour les utiliser comme clés dans notre dictionnaire (liste)
+				FilesTemplate = GetFilesList(DirectoryForEachCollaborateurType)
+				NameFilesTemplate = GetNameFiles(FilesTemplate)
+				
+				
+				
+				
+				'InjectDataInTemplates Cle, DirectoryToCreate, DirectoryForEachCollaborateurType, NameFilesTemplate, DictPrincipal, DataDiaFileWork
+				
+				
+	
+				
 			Next DirectoryToCreate
 		Next Cle
 
@@ -115,10 +137,7 @@ Sub refresh_data_dia()
 	
 	
 	
-    Dim message As String
-    message = DictionnaryToString(DictPrincipal)
-    
-    MsgBox message
+    AfficherDictionnaire DictPrincipal
 	
 	
 	Application.ScreenUpdating = True
@@ -516,8 +535,7 @@ End Sub
 		End With
 		
 		' Fermeture sans enregistrer et réactivation des options d'affichage
-		WkSource.Close SaveChanges:=False
-		Set WkSource = Nothing
+		WkSource.Close
 		
 		Application.DisplayAlerts = True
 	End Function
@@ -661,6 +679,23 @@ End Sub
 		GetCheminEnfant = FSO.BuildPath(CheminParent, NomEnfant)
 	End Function
 
+
+	Function GetNameFiles(ByRef LstFiles() As String) As String()
+		Dim FSO As Object
+		Dim Resultat() As String
+		Dim i As Long
+
+		Set FSO = CreateObject("Scripting.FileSystemObject")
+		ReDim Resultat(LBound(LstFiles) To UBound(LstFiles))
+
+		For i = LBound(LstFiles) To UBound(LstFiles)
+			' Extraction du nom sans chemin ni extension
+			Resultat(i) = FSO.GetBaseName(LstFiles(i))
+		Next i
+
+		GetNameFiles = Resultat
+	End Function
+	
 ' =========================================================================
 ' LES FONCTIONS
 ' =========================================================================
@@ -672,33 +707,31 @@ End Sub
 ' =========================================================================
 
 
-Function DictionnaryToString(ByVal Dico As Object, Optional ByVal Niveau As Long = 0) As String
-    Dim Cle As Variant
-    Dim Indentation As String
-    Dim Texte As String
+	Sub AfficherDictionnaire(ByVal Dict As Object, Optional ByVal Niveau As Long = 0)
+        Dim Cle As Variant
+        Dim Indentation As String
+        Indentation = String(Niveau * 4, " ") ' Décale le texte selon le niveau d'imbrication
     
-    If Dico Is Nothing Then Exit Function
+        If Dict Is Nothing Then Exit Sub
     
-    ' Crée les espaces pour l'indentation hiérarchique
-    Indentation = String(Niveau * 4, " ")
-    
-    For Each Cle In Dico.Keys
-        If IsObject(Dico(Cle)) Then
-            If TypeName(Dico(Cle)) = "Dictionary" Then
-                Texte = Texte & Indentation & "[" & Cle & "] :" & vbCrLf
-                ' Appel récursif pour les sous-dictionnaires
-                Texte = Texte & DictionnaryToString(Dico(Cle), Niveau + 1)
+        For Each Cle In Dict.Keys
+            If IsObject(Dict(Cle)) Then
+                Debug.Print Indentation & "[" & Cle & "] (Sous-dictionnaire/Objet)"
+                ' Appel récursif pour explorer le sous-dictionnaire
+                On Error Resume Next
+                AfficherDictionnaire Dict(Cle), Niveau + 1
+                On Error GoTo 0
+            ElseIf IsArray(Dict(Cle)) Then
+                Dim ArrTemp As Variant
+                ArrTemp = Dict(Cle)
+                
+                ' Affiche : Clé : [Elément1, Elément2, Elément3]
+                Debug.Print Indentation & Cle & " : [" & Join(ArrTemp, ", ") & "]"
             Else
-                Texte = Texte & Indentation & Cle & " : [Objet " & TypeName(Dico(Cle)) & "]" & vbCrLf
+                Debug.Print Indentation & Cle & " : " & Dict(Cle)
             End If
-        Else
-            Texte = Texte & Indentation & Cle & " : " & Dico(Cle) & vbCrLf
-        End If
-    Next Cle
-    
-    DictionnaryToString = Texte
-End Function
-
+        Next Cle
+    End Sub
 
 
 
@@ -782,7 +815,99 @@ End Function
 		End If
 		On Error GoTo 0
 	End Sub
+	
+	
+	Sub AjouterEntetesAuDictionnaire(ByRef Dict As Object, _
+									  ByVal CheminFichierList As Variant, _
+									  ByVal Cle As String, _
+									  ByVal CleDestination As String)
+		Dim WkCible As Workbook
+		Dim DictSousEntetes As Object
+		Dim ListeEnTetes As Collection
+		Dim Entetes() As String
+		Dim DerniereCol As Long
+		Dim i As Long, c As Long
+		Dim Titre As String
+		Dim PathFile As String
+		Dim FSO As Object
+		Dim NomSansExtension As String
+		
+		Set FSO = CreateObject("Scripting.FileSystemObject")
 
+		Application.ScreenUpdating = False
+		
+		' 2. Parcours des fichiers
+		For i = LBound(CheminFichierList) To UBound(CheminFichierList)
+			PathFile = CheminFichierList(i)
+			NomSansExtension = FSO.GetBaseName(PathFile)
+			Set DictSousEntetes = Dict("path_templates")("directory_in_templates")(Cle)("files_in_path")(NomSansExtension)
+			
+			If Trim(PathFile) <> "" Then
+				Set WkCible = Workbooks.Open(Filename:=PathFile, ReadOnly:=True)
+				
+				If Not WkCible Is Nothing Then
+					Set ListeEnTetes = New Collection
+					
+					With WkCible.Sheets(1)
+						DerniereCol = .Cells(2, .Columns.Count).End(xlToLeft).Column
+						
+						' Parcours des colonnes
+						For c = 1 To DerniereCol
+							Titre = CStr(.Cells(2, c).MergeArea.Cells(1, 1).Value)
+							
+							If .Cells(3, c).Value <> "" And .Cells(3, c).Value <> Titre Then
+								Titre = Titre & " - " & .Cells(3, c).Value
+							End If
+							
+							ListeEnTetes.Add Titre
+						Next c
+					End With
+					
+					WkCible.Close SaveChanges:=False
+					Set WkCible = Nothing
+					
+					' Conversion de la Collection en tableau String() pour ce fichier, on stock uniquement les headers relatif au fichier DIA_data
+					If ListeEnTetes.Count > 0 Then
+						ReDim Entetes(0 To ListeEnTetes.Count - 1)
+						For c = 1 To ListeEnTetes.Count
+							If Left(ListeEnTetes(c), 4) = "DIA_" Then
+								Entetes(c - 1) = ListeEnTetes(c)
+							End If
+						Next c
+						
+						' Enregistrement du tableau sous le chemin du fichier dans le sous-dictionnaire
+						DictSousEntetes(CleDestination) = Entetes
+					End If
+				End If
+			End If
+		Next i
+
+		Application.ScreenUpdating = True
+
+	End Sub
+	
+	
+	Sub InjectDataInTemplates(ByVal TypeCollab As String, ByVal NameCollab As String, ByVal PathCollab As String, ByVal NameFilesTemplate() As String, ByVal DictPrincipal As Object, ByVal WkSource As Workbook)
+		Dim i As Long
+		Dim HeadersToInject() As String
+		Dim CellsLabel As Range
+		Dim PlageLabel As Range
+		
+		' on itère sur chaque fichier contenue dans le dossier du collaborateur
+		For i = LBound(NameFilesTemplate) To UBound(NameFilesTemplate)
+			' Traitement exécuté UNIQUEMENT si l'élément ne commence pas par "suivi_"
+			If Not (UCase(Left(NameFilesTemplate(i), 6)) = "suivi_") Then
+				HeadersToInject = DictPrincipal("path_templates")("directory_in_templates")(TypeCollab)(NameFilesTemplate(i))("headers_file")
+				
+				' HeadersToInject = liste des colonnes dont on doit récupérer les valeurs dans le fichier de dia, attention commencent par "DIA_"
+				' DictPrincipal = dictionnaire contenant le path du fichier data dia
+				' * DictPrincipal("data_dia")("path")("path_data_dia_file")
+				' pour avoir le fichier dans lequel on doit injecter les données on récupère "PathCollab" auquel on ajoute le nom du fichier avec l'extension (dans le dictionnaire)
+				' * DictPrincipal("path_templates")("directory_in_templates")(TypeCollab)(NameFilesTemplate(i))("name")
+				
+			End If
+		Next i
+	End Sub
 ' =========================================================================
 ' LES SUB
 ' =========================================================================
