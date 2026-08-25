@@ -38,8 +38,6 @@ Sub refresh_data_dia()
     Dim HeadersDiaFile() As String
     HeadersDiaFile = GetColumnNamesFromPath(DictPrincipal("data_dia")("path_data_dia_file"))
     
-    'MsgBox Join(HeadersDiaFile, ", ")
-    
     ' validation de l'existence du dossier "templates"
     Const DirectoryTemplates As String = "templates"
     Dim CheminDossierTemplates As String
@@ -142,20 +140,32 @@ Sub refresh_data_dia()
     
     ' Si le dossier "collaborateur" existe déjà alors on met à jour
     If DirectoryCollaborateursexist Then
+        'On récupère le chemin du fichier "Centralisation.xlsx"
+        Const DirectoryArchives As String = "archives"
+        Dim CheminDossierArchives As String
+        CheminDossierArchives = get_path_directory(DictPrincipal("path_principal"), DirectoryArchives)
+        
         ' On récupère l'intégralité des données des fichiers remplit par les collaborateurs
-		' On les centralise dans un fichier sur 3 onglets dans le dosser archive
-        CentraliserDonneesCollaborateurs DictPrincipal
-		
-		' suppression du dossier "collaborateur" et de ce qu'il contient
-		SupprimerDossier CheminDirectorySuivieProd & DirectoryCollaborateurs
+        ' On les centralise dans un fichier sur 3 onglets dans le dossier archive
+        CentraliserDonneesCollaborateurs DictPrincipal, CheminDossierArchives
+        
+        ' suppression du dossier "collaborateur" et de ce qu'il contient
+        SupprimerDossier CheminDirectorySuivieProd & DirectoryCollaborateurs
         
         ' on regénère l'arborescence des dossiers COLLABORATEUR
-		' création du dossier collaborateurs
+        ' création du dossier collaborateurs
         CreerDossier CheminDirectorySuivieProd, DirectoryCollaborateurs
 
         On Error Resume Next
         Set DataDiaFileWork = Workbooks.Open(Filename:=DictPrincipal("data_dia")("path_data_dia_file"), ReadOnly:=True)
         On Error GoTo 0
+        
+        ' on récupère le fichier "centralisation.xlsx"
+        Dim PathCentralisation As String
+        Dim FSO As Object
+        Set FSO = CreateObject("Scripting.FileSystemObject")
+        PathCentralisation = FSO.BuildPath(CheminDossierArchives, "Centralisation.xlsx")
+        Set WkCentral = Workbooks.Open(Filename:=PathCentralisation, ReadOnly:=True, UpdateLinks:=False, AddToMru:=False)
         
         ' on récupère tous les nom de DA, DC, DS du fichier dia
         For Each Cle In DictPrincipal("path_templates")("directory_in_templates").Keys
@@ -186,16 +196,39 @@ Sub refresh_data_dia()
                 ' on injecte les bonnes données dans les bon template en fonction du type de colaborateur, du collaborateur et des filtres de matrice
                 InjectDataInTemplates Cle, DirectoryToCreate, DirectoryForEachCollaborateurType, NameFilesTemplate, DictPrincipal, DataDiaFileWork, DictFiltresTemplates
                 
+                ' On injecte les données des colonnes autres que DIA remplies par les collaborateurs depuis le fichier d'archives
+                Dim k As Long
+                Dim PathFichierCollaborateur As String
+
+                For k = LBound(FilesTemplate) To UBound(FilesTemplate)
+                    
+                    If UCase(Left(NameFilesTemplate(k), 6)) <> "SUIVI_" Then
+                        
+                        PathFichierCollaborateur = FilesTemplate(k)
+                        InjecterDonneesArchives PathFichierCollaborateur, NameFilesTemplate(k), WkCentral
+
+                    End If
+                    
+                Next k
+                
             Next DirectoryToCreate
         Next Cle
-		
-        ' on injecte les données DIA
-        ' on injecte les données précédemment remplies selon le "code du dossier"
-        ' attention pour la tva, bien le coupler avec le mois
-        ' on horodate le fichier
+        
+        WkCentral.Close SaveChanges:=False
+        Set WkCentral = Nothing
+        
+        ' on horodate le dossier qui contiendra "centralisation.xlsx"
+        ' on déplace le fichier dans le dossier "archives" du dossier du même nom
+        Const CentralisationName As String = "Centralisation"
+        ArchiverCentralisation PathCentralisation, CheminDossierArchives, CentralisationName
+        
+        ' on horodate le fichier dia
+        ' on déplace le fichier dans le dossier "archive"
     End If
     
-    ' AfficherDictionnaire DictPrincipal
+    ' Archiver et horodater fichier DATA_dia
+    Const DiaName As String = "Dia"
+    ArchiverCentralisation CheminDataDia, CheminDossierDataDia, DiaName
     
     FermerWorkbookSiOuvert DataDiaFileWork
     
@@ -227,19 +260,6 @@ End Sub
             End
         End If
         get_path_directory = path_to_return
-    End Function
-    
-    
-    Function GetPathFile(CheminDossier As String, FileToCheck As String) As String
-        Dim CheminComplet As String
-        
-        CheminComplet = CheminDossier & FileToCheck
-        If Dir(CheminComplet) <> "" Then
-            GetPathFile = CheminComplet
-        Else
-            MsgBox "Erreur : Le fichier '" & FileToCheck & "' est introuvable à l'emplacement :" & CheminDossier, vbCritical, "Fichier Manquant"
-            End
-        End If
     End Function
     
     
@@ -322,9 +342,8 @@ End Sub
         
         ' Vérifie s'il y a des fichiers dans le dossier
         If DossierSource.Files.Count = 0 Then
-            ReDim ListeFichiers(0 To -1)
-            GetFilesList = ListeFichiers
-            Exit Function
+            MsgBox "Il n'y a pas de fichier à récupérer dans le dossier '" & CStr(CheminDossier) & "'."
+            End
         End If
         
         ' Redimensionne le tableau au nombre exact de fichiers
@@ -1259,7 +1278,27 @@ End Sub
     End Sub
 
 
+    Function GetTemplateHeaderName(ByVal Ws As Worksheet, ByVal NumeroColonne As Long) As String
+        Dim Titre As String
+        Dim SousTitre As String
 
+        Titre = Trim(CStr( _
+            Ws.Cells(2, NumeroColonne) _
+            .MergeArea.Cells(1, 1).Value))
+
+        SousTitre = Trim(CStr( _
+            Ws.Cells(3, NumeroColonne).Value))
+        
+        If SousTitre <> "" _
+           And SousTitre <> Titre Then
+            
+            Titre = Titre & " - " & SousTitre
+            
+        End If
+        
+        GetTemplateHeaderName = Titre
+
+    End Function
 
 
 ' =========================================================================
@@ -1401,7 +1440,7 @@ End Sub
                 End If
             End If
         Next i
-		
+        
     End Sub
     
     
@@ -1868,14 +1907,13 @@ End Sub
     
 
     Sub CentraliserDonneesCollaborateurs( _
-        ByVal DictPrincipal As Object)
+        ByVal DictPrincipal As Object, ByVal CheminDossierArchives As String)
 
         Dim FSO As Object
         
         Dim PathPrincipal As String
         Dim PathRacine As String
         Dim PathCollaborateurs As String
-        Dim PathArchives As String
         Dim PathFichierCentral As String
         
         Dim WkCentral As Workbook
@@ -1916,33 +1954,15 @@ End Sub
                 "collaborateurs" _
             )
         
-        PathArchives = _
-            FSO.BuildPath( _
-                PathPrincipal, _
-                "archives" _
-            )
-        
-        ' =========================================================
-        ' CRÉATION DU DOSSIER ARCHIVES SI NÉCESSAIRE
-        ' =========================================================
-        
-        If Not FSO.FolderExists(PathArchives) Then
-            
-            FSO.CreateFolder PathArchives
-            
-        End If
-        
-        
         ' =========================================================
         ' FICHIER CENTRAL
         ' =========================================================
         
         PathFichierCentral = _
             FSO.BuildPath( _
-                PathArchives, _
+                CheminDossierArchives, _
                 "Centralisation.xlsx" _
             )
-        
         
         ' =========================================================
         ' OUVERTURE / CRÉATION DU FICHIER CENTRAL
@@ -2244,19 +2264,415 @@ End Sub
         On Error GoTo 0
     
     End Sub
-	
-	
-	Sub SupprimerDossier(ByVal CheminRacine As String)
-		Dim FSO As Object
-		
-		Set FSO = CreateObject("Scripting.FileSystemObject")
+    
+    
+    Sub SupprimerDossier(ByVal CheminRacine As String)
+        Dim FSO As Object
+        
+        Set FSO = CreateObject("Scripting.FileSystemObject")
 
-		FSO.DeleteFolder CheminCollaborateurs, True
-		
-		Set FSO = Nothing
-	End Sub
+        FSO.DeleteFolder CheminRacine, True
+        
+        Set FSO = Nothing
+    End Sub
+    
+    
+    Sub InjecterDonneesArchives( _
+        ByVal PathFichierCollaborateur As String, _
+        ByVal NomTemplate As String, _
+        ByVal WkCentral As Workbook)
+
+        Dim FSO As Object
+        
+        Dim WkCollaborateur As Workbook
+        
+        Dim WsCentral As Worksheet
+        Dim WsCollaborateur As Worksheet
+        
+        Dim DerniereLigneCentral As Long
+        Dim DerniereColCentral As Long
+        Dim DerniereLigneCollab As Long
+        
+        Dim ColCodeCentral As Long
+        Dim ColCodeCollab As Long
+        
+        Dim ColMoisCentral As Long
+        Dim ColMoisCollab As Long
+        
+        Dim LigneCentral As Long
+        Dim LigneCollab As Long
+        Dim ColCentral As Long
+        
+        Dim NomColonne As String
+        Dim ColDestination As Long
+        
+        Dim CodeCentral As String
+        Dim CodeCollab As String
+        
+        Dim MoisCentral As String
+        Dim MoisCollab As String
+        
+        Dim CleCentral As String
+        Dim CleCollab As String
+        
+        Dim DictLignesCollaborateur As Object
+
+        Set FSO = CreateObject("Scripting.FileSystemObject")
+
+        ' =========================================================
+        ' CONTRÔLE FICHIER COLLABORATEUR
+        ' =========================================================
+        
+        If Not FSO.FileExists(PathFichierCollaborateur) Then
+            
+            MsgBox _
+                "Fichier collaborateur introuvable :" & vbCrLf & _
+                PathFichierCollaborateur, _
+                vbCritical
+            
+            End
+            
+        End If
+        
+        ' =========================================================
+        ' RECHERCHE DE L'ONGLET CORRESPONDANT AU TEMPLATE
+        ' =========================================================
+        
+        Set WsCentral = Nothing
+        
+        On Error Resume Next
+        Set WsCentral = WkCentral.Worksheets(NomTemplate)
+        On Error GoTo 0
+
+        ' Aucun onglet correspondant :
+        ' aucune donnée historique à récupérer
+        If WsCentral Is Nothing Then
+            Exit Sub
+        End If
+        
+        
+        ' =========================================================
+        ' OUVERTURE DU FICHIER COLLABORATEUR
+        ' =========================================================
+        
+        Set WkCollaborateur = Workbooks.Open( _
+            Filename:=PathFichierCollaborateur, _
+            ReadOnly:=False, _
+            UpdateLinks:=False, _
+            AddToMru:=False _
+        )
+        
+        Set WsCollaborateur = WkCollaborateur.Worksheets(1)
+
+        ' =========================================================
+        ' RECHERCHE DE LA CLÉ PRINCIPALE
+        ' DIA_Code du dossier
+        ' =========================================================
+        
+        ColCodeCentral = GetTemplateColumnNumber( _
+            WsCentral, _
+            "DIA_Code du dossier" _
+        )
+        
+        ColCodeCollab = GetTemplateColumnNumber( _
+            WsCollaborateur, _
+            "DIA_Code du dossier" _
+        )
+
+        If ColCodeCentral = 0 Or ColCodeCollab = 0 Then
+            
+            MsgBox _
+                "La colonne 'DIA_Code du dossier' est introuvable." & _
+                vbCrLf & _
+                "Template : " & NomTemplate, _
+                vbCritical
+            
+            WkCollaborateur.Close SaveChanges:=False
+            Exit Sub
+            
+        End If
+
+        ' =========================================================
+        ' CAS SPÉCIAL TVA
+        '
+        ' Clé :
+        ' Code dossier + mois
+        ' =========================================================
+        
+        If LCase(Trim(NomTemplate)) = "tva" Then
+            
+            ColMoisCentral = GetTemplateColumnNumber( _
+                WsCentral, _
+                "mois" _
+            )
+            
+            ColMoisCollab = GetTemplateColumnNumber( _
+                WsCollaborateur, _
+                "mois" _
+            )
+
+            If ColMoisCentral = 0 Or ColMoisCollab = 0 Then
+                
+                MsgBox _
+                    "La colonne 'mois' est introuvable pour le template TVA.", _
+                    vbCritical
+                
+                WkCollaborateur.Close SaveChanges:=False
+                End
+                
+            End If
+            
+        End If
+
+        ' =========================================================
+        ' DIMENSIONS
+        ' =========================================================
+        
+        DerniereLigneCentral = DerniereLigneUtilisee(WsCentral)
+        DerniereColCentral = DerniereColonneUtilisee(WsCentral)
+        DerniereLigneCollab = DerniereLigneUtilisee(WsCollaborateur)
+
+        ' =========================================================
+        ' DICTIONNAIRE DES LIGNES DU FICHIER COLLABORATEUR
+        '
+        ' Standard :
+        ' CODE
+        '
+        ' TVA :
+        ' CODE|MOIS
+        ' =========================================================
+        
+        Set DictLignesCollaborateur = _
+            CreateObject("Scripting.Dictionary")
+        
+        DictLignesCollaborateur.CompareMode = vbTextCompare
+
+        For LigneCollab = 4 To DerniereLigneCollab
+            
+            CodeCollab = Trim(CStr( _
+                WsCollaborateur.Cells( _
+                    LigneCollab, _
+                    ColCodeCollab _
+                ).Value _
+            ))
+            
+            If CodeCollab <> "" Then
+                
+                If LCase(Trim(NomTemplate)) = "tva" Then
+                    
+                    MoisCollab = Trim(CStr( _
+                        WsCollaborateur.Cells( _
+                            LigneCollab, _
+                            ColMoisCollab _
+                        ).Value _
+                    ))
+                    
+                    CleCollab = _
+                        CodeCollab & "|" & LCase(MoisCollab)
+                    
+                Else
+                    
+                    CleCollab = CodeCollab
+                    
+                End If
+                            
+                If Not DictLignesCollaborateur.Exists(CleCollab) Then
+                    
+                    DictLignesCollaborateur.Add _
+                        CleCollab, _
+                        LigneCollab
+                    
+                End If
+
+            End If
+
+        Next LigneCollab
+
+        ' =========================================================
+        ' PARCOURS DE CENTRALISATION
+        ' =========================================================
+        
+        For LigneCentral = 4 To DerniereLigneCentral
+
+            CodeCentral = Trim(CStr( _
+                WsCentral.Cells( _
+                    LigneCentral, _
+                    ColCodeCentral _
+                ).Value _
+            ))
+
+            If CodeCentral <> "" Then
+
+                ' =================================================
+                ' CONSTRUCTION DE LA CLÉ
+                ' =================================================
+                
+                If LCase(Trim(NomTemplate)) = "tva" Then
+                    MoisCentral = Trim(CStr( _
+                        WsCentral.Cells( _
+                            LigneCentral, _
+                            ColMoisCentral _
+                        ).Value _
+                    ))
+
+                    CleCentral = CodeCentral & "|" & LCase(MoisCentral)
+                Else
+                    CleCentral = CodeCentral
+                End If
+
+                ' =================================================
+                ' SI LE DOSSIER EXISTE DANS LE NOUVEAU FICHIER
+                ' =================================================
+                
+                If DictLignesCollaborateur.Exists(CleCentral) Then
+
+                    LigneCollab = DictLignesCollaborateur(CleCentral)
+                    
+                    ' =============================================
+                    ' PARCOURS DES COLONNES CENTRALISÉES
+                    ' =============================================
+                    
+                    For ColCentral = 1 To DerniereColCentral
+        
+                        NomColonne = GetTemplateHeaderName(WsCentral, ColCentral)
+
+                        If NomColonne <> "" Then
+
+                            ' =====================================
+                            ' ON NE RÉINJECTE JAMAIS LES DIA_
+                            ' =====================================
+                            
+                            If UCase(Left( _
+                                Trim(NomColonne), _
+                                4 _
+                            )) <> "DIA_" Then
+
+                                ColDestination = _
+                                    GetTemplateColumnNumber( _
+                                        WsCollaborateur, _
+                                        NomColonne _
+                                    )
+
+                                ' La colonne existe aussi dans
+                                ' le nouveau fichier collaborateur
+                                If ColDestination > 0 Then
+
+                                    WsCollaborateur.Cells( _
+                                        LigneCollab, _
+                                        ColDestination _
+                                    ).Value = _
+                                        WsCentral.Cells( _
+                                            LigneCentral, _
+                                            ColCentral _
+                                        ).Value
+                            
+                                End If
+                            
+                            End If
+                    
+                        End If
+                
+                    Next ColCentral
+    
+                End If
+    
+            End If
+
+        Next LigneCentral
+
+        ' =========================================================
+        ' ENREGISTREMENT DU FICHIER COLLABORATEUR
+        ' =========================================================
+        
+        WkCollaborateur.Close SaveChanges:=True
+        Set WsCollaborateur = Nothing
+        Set WsCentral = Nothing
+        Set WkCollaborateur = Nothing
+        Set DictLignesCollaborateur = Nothing
+        Set FSO = Nothing
+
+    End Sub
+    
+    
+    Sub ArchiverCentralisation(ByVal PathCentralisation As String, ByVal CheminDossierArchives As String, ByVal NomFichier As String)
+        Dim FSO As Object
+        
+        Dim CheminSousDossierArchives As String
+        Dim CheminDossierDIA As String
+        Dim CheminCentralisationArchive As String
+        
+        Dim NomDossierDIA As String
+        Dim Horodatage As String
+        
+        Set FSO = CreateObject("Scripting.FileSystemObject")
+        
+        ' =========================================================
+        ' CRÉATION DU SOUS-DOSSIER "archives"
+        '
+        ' Exemple :
+        ' ...\archives\archives
+        ' =========================================================
+        
+        CheminSousDossierArchives = FSO.BuildPath(CheminDossierArchives, "archives")
+
+        If Not FSO.FolderExists(CheminSousDossierArchives) Then
+            
+            FSO.CreateFolder CheminSousDossierArchives
+            
+        End If
+
+        ' =========================================================
+        ' CRÉATION DE L'HORODATAGE
+        '
+        ' Exemple :
+        ' 18-08-2026_09-58-22
+        ' =========================================================
+        
+        Horodatage = Format(Now, "dd-mm-yyyy_hh-nn-ss")
+
+        ' =========================================================
+        ' NOM DU DOSSIER DIA
+        ' =========================================================
+        
+        NomDossierDIA = NomFichier & "_" & Horodatage
+
+        ' =========================================================
+        ' CHEMIN COMPLET DU DOSSIER DIA
+        ' =========================================================
+        
+        CheminDossierDIA = FSO.BuildPath(CheminSousDossierArchives, NomDossierDIA)
+
+        ' =========================================================
+        ' CRÉATION DU DOSSIER DIA
+        ' =========================================================
+        
+        If Not FSO.FolderExists(CheminDossierDIA) Then
+            
+            FSO.CreateFolder CheminDossierDIA
+            
+        End If
+
+        ' =========================================================
+        ' CHEMIN FINAL DE CENTRALISATION.XLSX
+        ' =========================================================
+        
+        CheminCentralisationArchive = FSO.BuildPath(CheminDossierDIA, FSO.GetFileName(PathCentralisation))
+
+        ' =========================================================
+        ' DÉPLACEMENT DE CENTRALISATION.XLSX
+        '
+        ' Le fichier disparaît de son emplacement actuel
+        ' et est déplacé dans DIA_file_*
+        ' =========================================================
+        
+        FSO.MoveFile Source:=PathCentralisation, Destination:=CheminCentralisationArchive
+        Set FSO = Nothing
+
+    End Sub
 
 ' =========================================================================
 ' LES SUB
 ' =========================================================================
+
+
 
