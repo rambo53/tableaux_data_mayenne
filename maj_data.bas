@@ -50,7 +50,10 @@ Sub refresh_data_dia()
     ' création du dictionnaire contenant les sous dossiers de "templates"
     Dim CheminDirectoryTemplates() As String
     CheminDirectoryTemplates = GetSubFoldersList(CheminDossierTemplates)
-    
+  
+    ' Contrôler si dans fichier DIA il y a bien des collaborateurs affectés à chaque dossier selon les différents profils data
+    'ControleValeursCollaborateursDIA CheminDirectoryTemplates, CheminDataDia
+        
     Set DictPrincipal = AddFoldersToDictionary(DictPrincipal, CheminDirectoryTemplates)
     
     ' récupération des fichiers dans chacun des dossiers du dossier "templates"
@@ -121,17 +124,16 @@ Sub refresh_data_dia()
                 
                 ' intégration des fichier depuis le dossier template pour chaque catégorie de collaborateur
                 DirectoryForEachCollaborateurType = GetCheminEnfant(DirectoryForEachCollaborateurType, DirectoryToCreate)
-                CopierTousLesFichiers DictPrincipal("path_templates")("directory_in_templates")(Cle)("path"), DirectoryForEachCollaborateurType
+                CopierTousLesFichiers DictPrincipal("path_templates")("directory_in_templates")(Cle)("path"), DirectoryForEachCollaborateurType, DirectoryToCreate
                 
                 ' DirectoryToCreate = nom collab'
                 ' Cle = Data Analyste
                 ' DirectoryForEachCollaborateurType = chemin complet pour récupérer fichiers templates
                 ' NameFilesTemplate= le nom des fichiers sans extension pour les utiliser comme clés dans notre dictionnaire (liste)
                 FilesTemplate = GetFilesList(DirectoryForEachCollaborateurType)
-                NameFilesTemplate = GetNameFiles(FilesTemplate)
                 
                 ' on injecte les bonnes données dans les bon template en fonction du type de colaborateur, du collaborateur et des filtres de matrice
-                InjectDataInTemplates Cle, DirectoryToCreate, DirectoryForEachCollaborateurType, NameFilesTemplate, DictPrincipal, DataDiaFileWork, DictFiltresTemplates
+                InjectDataInTemplates Cle, DirectoryToCreate, DirectoryForEachCollaborateurType, DictPrincipal, DataDiaFileWork, DictFiltresTemplates
                 
             Next DirectoryToCreate
         Next Cle
@@ -140,6 +142,10 @@ Sub refresh_data_dia()
     
     ' Si le dossier "collaborateur" existe déjà alors on met à jour
     If DirectoryCollaborateursexist Then
+    
+        ' on vérifie si des fichiers sont déjà ouverts on les liste dans un msgbox
+        ControleFichiersCollaborateursOuverts DictPrincipal
+        
         'On récupère le chemin du fichier "Centralisation.xlsx"
         Const DirectoryArchives As String = "archives"
         Dim CheminDossierArchives As String
@@ -184,17 +190,16 @@ Sub refresh_data_dia()
                 
                 ' intégration des fichier depuis le dossier template pour chaque catégorie de collaborateur
                 DirectoryForEachCollaborateurType = GetCheminEnfant(DirectoryForEachCollaborateurType, DirectoryToCreate)
-                CopierTousLesFichiers DictPrincipal("path_templates")("directory_in_templates")(Cle)("path"), DirectoryForEachCollaborateurType
+                CopierTousLesFichiers DictPrincipal("path_templates")("directory_in_templates")(Cle)("path"), DirectoryForEachCollaborateurType, DirectoryToCreate
                 
                 ' DirectoryToCreate = nom collab'
                 ' Cle = Data Analyste
                 ' DirectoryForEachCollaborateurType = chemin complet pour récupérer fichiers templates
                 ' NameFilesTemplate= le nom des fichiers sans extension pour les utiliser comme clés dans notre dictionnaire (liste)
                 FilesTemplate = GetFilesList(DirectoryForEachCollaborateurType)
-                NameFilesTemplate = GetNameFiles(FilesTemplate)
                 
                 ' on injecte les bonnes données dans les bon template en fonction du type de colaborateur, du collaborateur et des filtres de matrice
-                InjectDataInTemplates Cle, DirectoryToCreate, DirectoryForEachCollaborateurType, NameFilesTemplate, DictPrincipal, DataDiaFileWork, DictFiltresTemplates
+                InjectDataInTemplates Cle, DirectoryToCreate, DirectoryForEachCollaborateurType, DictPrincipal, DataDiaFileWork, DictFiltresTemplates
                 
                 ' On injecte les données des colonnes autres que DIA remplies par les collaborateurs depuis le fichier d'archives
                 Dim k As Long
@@ -342,7 +347,7 @@ End Sub
         
         ' Vérifie s'il y a des fichiers dans le dossier
         If DossierSource.Files.Count = 0 Then
-            MsgBox "Il n'y a pas de fichier à récupérer dans le dossier '" & CStr(CheminDossier) & "'."
+            MsgBox "Il n'y a pas de fichier à traiter dans le dossier '" & DossierSource & "'."
             End
         End If
         
@@ -404,7 +409,7 @@ End Sub
         Dim WsFiltre As Worksheet
         
         Dim PathTemplate As String
-        Dim ColonneDia As String
+        Dim ColonneDIA As String
         Dim ValeurAGarder As String
         
         Set DictFiltres = CreateObject("Scripting.Dictionary")
@@ -466,14 +471,14 @@ End Sub
                     ' B2 = valeur à conserver
                     ' =============================================
                     
-                    ColonneDia = Trim(CStr(WsFiltre.Range("A2").Value))
+                    ColonneDIA = Trim(CStr(WsFiltre.Range("A2").Value))
                     ValeurAGarder = Trim(CStr(WsFiltre.Range("B2").Value))
                     
                     ' =============================================
                     ' CONTRÔLE DU PARAMÉTRAGE
                     ' =============================================
                     
-                    If ColonneDia = "" Then
+                    If ColonneDIA = "" Then
                         MsgBox _
                             "Le template '" & NomTemplate & _
                             "' possède un onglet 'filtre'," & vbCrLf & _
@@ -505,7 +510,7 @@ End Sub
                     
                     DictFiltreTemplate.Add _
                         "colonne_dia", _
-                        ColonneDia
+                        ColonneDIA
                     
                     DictFiltreTemplate.Add _
                         "valeur_a_garder", _
@@ -535,7 +540,7 @@ End Sub
                         If _
                             StrComp( _
                                 CStr(DictFiltres(NomTemplate)("colonne_dia")), _
-                                ColonneDia, _
+                                ColonneDIA, _
                                 vbTextCompare _
                             ) <> 0 _
                         Or _
@@ -619,15 +624,11 @@ End Sub
                 On Error GoTo 0
 
                 If WkCible Is Nothing Then
-                    MsgBox _
-                        "Erreur : Impossible d'ouvrir le fichier " & _
-                        PathFile, _
-                        vbCritical
+                    MsgBox "Erreur : Impossible d'ouvrir le fichier " & PathFile, vbCritical
+                    End
                 Else
                     With WkCible.Sheets(1)
-                        DerniereCol = _
-                            .Cells(2, .Columns.Count) _
-                            .End(xlToLeft).Column
+                        DerniereCol = .Cells(2, .Columns.Count).End(xlToLeft).Column
 
                         ' =========================================
                         ' PARCOURS DES COLONNES
@@ -931,20 +932,42 @@ End Sub
     End Function
 
 
-    Function GetNameFiles(ByRef LstFiles() As String) As String()
+    Function GetNameFiles(ByRef LstFiles() As String, ByVal CodeCollaborateur As String) As String()
         Dim FSO As Object
         Dim Resultat() As String
+        
         Dim i As Long
-
+        Dim NomSansExtension As String
+        Dim Suffixe As String
+        
         Set FSO = CreateObject("Scripting.FileSystemObject")
+        
         ReDim Resultat(LBound(LstFiles) To UBound(LstFiles))
-
+        
+        Suffixe = "_" & CodeCollaborateur
+    
         For i = LBound(LstFiles) To UBound(LstFiles)
-            ' Extraction du nom sans chemin ni extension
-            Resultat(i) = FSO.GetBaseName(LstFiles(i))
+            
+            NomSansExtension = FSO.GetBaseName(LstFiles(i))
+            
+            If Len(NomSansExtension) > Len(Suffixe) Then
+                
+                If StrComp(Right(NomSansExtension, Len(Suffixe)), Suffixe, vbTextCompare) = 0 Then
+                    
+                    NomSansExtension = Left(NomSansExtension, Len(NomSansExtension) - Len(Suffixe))
+                    
+                End If
+                
+            End If
+            
+            Resultat(i) = NomSansExtension
+            
         Next i
-
-        GetNameFiles = Resultat
+    
+        GetNameTemplatesCollaborateur = Resultat
+    
+        Set FSO = Nothing
+    
     End Function
     
     
@@ -1240,16 +1263,10 @@ End Sub
 
     End Function
     
+    
 ' =========================================================================
 ' LES FONCTIONS
 ' =========================================================================
-
-
-
-' =========================================================================
-' DEBUG DICT
-' =========================================================================
-
 
     Sub AfficherDictionnaire(ByVal Dict As Object, Optional ByVal Niveau As Long = 0)
         Dim Cle As Variant
@@ -1300,6 +1317,60 @@ End Sub
 
     End Function
 
+
+    Function GetNomTemplateDepuisFichier( _
+        ByVal NomFichier As String, _
+        ByVal CodeCollaborateur As String) As String
+    
+        Dim FSO As Object
+        Dim NomSansExtension As String
+        Dim Suffixe As String
+        
+        Set FSO = CreateObject("Scripting.FileSystemObject")
+        
+        NomSansExtension = FSO.GetBaseName(NomFichier)
+        Suffixe = "_" & CodeCollaborateur
+        
+        If Len(NomSansExtension) > Len(Suffixe) Then
+            
+            If StrComp(Right(NomSansExtension, Len(Suffixe)), Suffixe, vbTextCompare) = 0 Then
+                
+                NomSansExtension = Left(NomSansExtension, Len(NomSansExtension) - Len(Suffixe))
+                
+            End If
+            
+        End If
+        
+        GetNomTemplateDepuisFichier = NomSansExtension
+        
+        Set FSO = Nothing
+    
+    End Function
+    
+    
+    Function GetNomFichierCollaborateur( _
+        ByVal NomTemplateAvecExtension As String, _
+        ByVal CodeCollaborateur As String) As String
+    
+        Dim FSO As Object
+        Dim NomBase As String
+        Dim Extension As String
+        
+        Set FSO = CreateObject("Scripting.FileSystemObject")
+        
+        NomBase = FSO.GetBaseName(NomTemplateAvecExtension)
+        Extension = FSO.GetExtensionName(NomTemplateAvecExtension)
+        
+        GetNomFichierCollaborateur = NomBase & "_" & CodeCollaborateur
+        
+        If Extension <> "" Then
+            GetNomFichierCollaborateur = GetNomFichierCollaborateur & "." & Extension
+        End If
+        
+        Set FSO = Nothing
+    
+    End Function
+    
 
 ' =========================================================================
 ' LES SUB
@@ -1357,24 +1428,45 @@ End Sub
     End Sub
     
     
-    Sub CopierTousLesFichiers(ByVal DossierSource As String, ByVal DossierDestination As String)
+    Sub CopierTousLesFichiers(ByVal DossierSource As String, ByVal DossierDestination As String, ByVal CodeCollaborateur As String)
+    
         Dim FSO As Object
-        Dim MasqueSource As String
-
-        Set FSO = CreateObject("Scripting.FileSystemObject")
-
-        ' 3. Construction du filtre (ex: "C:\DossierA\*.*" ou "C:\DossierA\*")
-        MasqueSource = FSO.BuildPath(DossierSource, "*")
-
-        ' 4. Copie de TOUS les fichiers en un seul bloc (Overwrite:=True écrase les fichiers existants)
-        On Error Resume Next
-        FSO.CopyFile MasqueSource, DossierDestination & "\", True
+        Dim Dossier As Object
+        Dim Fichier As Object
         
-        If Err.Number <> 0 Then
-            MsgBox "Erreur lors de la copie : " & Err.Description, vbExclamation
-            End
-        End If
-        On Error GoTo 0
+        Dim NomSansExtension As String
+        Dim Extension As String
+        Dim NouveauNom As String
+        Dim PathDestination As String
+        
+        Set FSO = CreateObject("Scripting.FileSystemObject")
+        Set Dossier = FSO.GetFolder(DossierSource)
+    
+        For Each Fichier In Dossier.Files
+            
+            NomSansExtension = FSO.GetBaseName(Fichier.name)
+            Extension = FSO.GetExtensionName(Fichier.name)
+            
+            NouveauNom = NomSansExtension & "_" & CodeCollaborateur
+            
+            If Extension <> "" Then
+                NouveauNom = NouveauNom & "." & Extension
+            End If
+            
+            PathDestination = FSO.BuildPath( _
+                DossierDestination, _
+                NouveauNom)
+            
+            FSO.CopyFile _
+                Source:=Fichier.path, _
+                Destination:=PathDestination, _
+                OverWriteFiles:=True
+            
+        Next Fichier
+    
+        Set Dossier = Nothing
+        Set FSO = Nothing
+    
     End Sub
     
     
@@ -1443,17 +1535,15 @@ End Sub
         
     End Sub
     
-    
     Sub InjectDataInTemplates( _
         ByVal TypeCollab As String, _
         ByVal NameCollab As String, _
         ByVal PathCollab As String, _
-        ByRef NameFilesTemplate() As String, _
         ByVal DictPrincipal As Object, _
         ByVal WkSource As Workbook, _
         ByVal DictFiltresTemplates As Object)
-
-        Dim i As Long
+    
+        Dim NomTemplate As Variant
         Dim HeadersToInject As Variant
         
         Dim WkDestination As Workbook
@@ -1462,6 +1552,7 @@ End Sub
         
         Dim PathFileDestination As String
         Dim NameFileWithExtension As String
+        Dim NameFileCollaborateur As String
         
         Dim ColFiltreSource As Long
         Dim DerniereLigneSource As Long
@@ -1473,187 +1564,159 @@ End Sub
         
         Set FSO = CreateObject("Scripting.FileSystemObject")
         Set WsSource = WkSource.Sheets(1)
-
+    
         ' =========================================================
-        ' RECHERCHE DE LA COLONNE DA / DC / DS DANS LE FICHIER DIA
+        ' RECHERCHE COLONNE COLLABORATEUR DANS DIA
         ' =========================================================
         
-        ColFiltreSource = GetColumnNumberByHeader( _
-            WsSource, _
-            TypeCollab, _
-            1)
+        ColFiltreSource = GetColumnNumberByHeader(WsSource, TypeCollab, 1)
         
         If ColFiltreSource = 0 Then
             
-            MsgBox _
-                "La colonne '" & TypeCollab & _
-                "' est introuvable dans le fichier DIA.", _
-                vbCritical
-            
+            MsgBox "La colonne '" & TypeCollab & "' est introuvable dans le fichier DIA.", vbCritical
             End
             
         End If
         
-        DerniereLigneSource = WsSource.Cells( _
-            WsSource.Rows.Count, _
-            ColFiltreSource _
-        ).End(xlUp).Row
-
+        DerniereLigneSource = WsSource.Cells(WsSource.Rows.Count, ColFiltreSource).End(xlUp).Row
+    
         ' =========================================================
-        ' PARCOURS DES FICHIERS DU COLLABORATEUR
+        ' PARCOURS DIRECT DES TEMPLATES DU DICTIONNAIRE
+        '
+        ' NomTemplate =
+        ' TVA
+        ' liasse
+        ' acompte_IS
+        ' suivi_xxx
         ' =========================================================
         
-        For i = LBound(NameFilesTemplate) To UBound(NameFilesTemplate)
+        For Each NomTemplate In DictPrincipal("path_templates")("directory_in_templates")(TypeCollab)("files_in_path").Keys
+    
             ' =====================================================
-            ' ON IGNORE LES FICHIERS SUIVI_*
+            ' ON IGNORE LES TEMPLATES SUIVI_
             ' =====================================================
             
-            If Not (UCase(Left(NameFilesTemplate(i), 6)) = "SUIVI_") Then
+            If UCase(Left(CStr(NomTemplate), 6)) <> "SUIVI_" Then
+    
                 ' =================================================
-                ' RÉCUPÉRATION DES HEADERS DIA_ DU TEMPLATE
-                ' =================================================
-                
-                HeadersToInject = _
-                    DictPrincipal("path_templates") _
-                    ("directory_in_templates")(TypeCollab) _
-                    ("files_in_path")(NameFilesTemplate(i)) _
-                    ("headers_file")
-                
-                ' =================================================
-                ' NOM RÉEL DU FICHIER AVEC EXTENSION
+                ' HEADERS DIA_ DU TEMPLATE
                 ' =================================================
                 
-                NameFileWithExtension = _
-                    DictPrincipal("path_templates") _
-                    ("directory_in_templates")(TypeCollab) _
-                    ("files_in_path")(NameFilesTemplate(i)) _
-                    ("name")
-                            
+                HeadersToInject = DictPrincipal("path_templates")("directory_in_templates")(TypeCollab)("files_in_path")(NomTemplate)("headers_file")
+    
                 ' =================================================
-                ' CONSTRUCTION DU CHEMIN DU FICHIER COLLABORATEUR
-                ' =================================================
-                
-                PathFileDestination = _
-                    FSO.BuildPath( _
-                        PathCollab, _
-                        NameFileWithExtension _
-                    )
-                            
-                ' =================================================
-                ' OUVERTURE DU FICHIER
-                ' =================================================
-                
-                Set WkDestination = Workbooks.Open( _
-                    Filename:=PathFileDestination, _
-                    ReadOnly:=False)
-                            
-                Set WsDestination = WkDestination.Sheets(1)
-                            
-                ' =================================================
-                ' PREMIÈRE LIGNE D'INJECTION
+                ' NOM ORIGINAL DU TEMPLATE
                 '
-                ' Headers lignes 2 / 3
-                ' Données à partir de la ligne 4
+                ' Exemple :
+                ' TVA.xlsx
+                ' =================================================
+                
+                NameFileWithExtension = DictPrincipal("path_templates")("directory_in_templates")(TypeCollab)("files_in_path")(NomTemplate)("name")
+    
+                ' =================================================
+                ' NOM PHYSIQUE DU FICHIER COLLABORATEUR
+                '
+                ' TVA.xlsx
+                ' +
+                ' ALLARD-ROS
+                '
+                ' =>
+                ' TVA_ALLARD-ROS.xlsx
+                ' =================================================
+                
+                NameFileCollaborateur = GetNomFichierCollaborateur(NameFileWithExtension, NameCollab)
+    
+                ' =================================================
+                ' CHEMIN COMPLET
+                ' =================================================
+                
+                PathFileDestination = FSO.BuildPath(PathCollab, NameFileCollaborateur)
+    
+                ' =================================================
+                ' CONTRÔLE EXISTENCE
+                ' =================================================
+                
+                If Not FSO.FileExists(PathFileDestination) Then
+                    
+                    MsgBox "Le fichier collaborateur est introuvable :" & vbCrLf & vbCrLf & PathFileDestination, vbCritical
+                    End
+                    
+                End If
+    
+                ' =================================================
+                ' OUVERTURE
+                ' =================================================
+                
+                Set WkDestination = Workbooks.Open(Filename:=PathFileDestination, ReadOnly:=False, UpdateLinks:=False, AddToMru:=False)
+                
+                Set WsDestination = WkDestination.Sheets(1)
+    
+                ' =================================================
+                ' PREMIÈRE LIGNE DE DONNÉES
                 ' =================================================
                 
                 LigneDestination = 4
-                            
+    
                 ' =================================================
-                ' PARCOURS DES LIGNES DU FICHIER DIA
+                ' PARCOURS DIA
                 ' =================================================
                 
                 For LigneSource = 2 To DerniereLigneSource
-                                    
-                    ' =================================================
-                    ' FILTRE COLLABORATEUR
-                    ' =================================================
+    
+                    ' =============================================
+                    ' LE DOSSIER APPARTIENT AU COLLABORATEUR
+                    ' =============================================
                     
-                    If Trim(CStr( _
-                        WsSource.Cells( _
-                            LigneSource, _
-                            ColFiltreSource _
-                        ).Value _
-                    )) = Trim(NameCollab) Then
-                                                
-                        ' =================================================
-                        ' FILTRE SPÉCIFIQUE AU TEMPLATE
-                        '
-                        ' Si aucun filtre n'existe pour le template :
-                        ' DossierDoitEtreInjecte = True
-                        ' =================================================
+                    If StrComp(Trim(CStr(WsSource.Cells(LigneSource, ColFiltreSource).Value)), Trim(NameCollab), vbTextCompare) = 0 Then
+    
+                        ' =========================================
+                        ' FILTRE ÉVENTUEL DU TEMPLATE
+                        ' =========================================
                         
-                        If DossierDoitEtreInjecte( _
-                            NameFilesTemplate(i), _
-                            WsSource, _
-                            LigneSource, _
-                            DictFiltresTemplates _
-                        ) Then
-                                                        
-                            ' =============================================
-                            ' CHOIX DU TRAITEMENT
-                            ' =============================================
+                        If DossierDoitEtreInjecte(CStr(NomTemplate), WsSource, LigneSource, DictFiltresTemplates) Then
+    
+                            ' =====================================
+                            ' TVA
+                            ' =====================================
                             
-                            If LCase(Trim(NameFilesTemplate(i))) = "tva" Then
-                                                                
-                                ' =========================================
-                                ' TRAITEMENT SPÉCIFIQUE TVA
-                                '
-                                ' Mensuelle :
-                                ' 12 lignes
-                                '
-                                ' Trimestrielle :
-                                ' 4 lignes
-                                '
-                                ' Autres :
-                                ' 1 ligne
-                                ' =========================================
-                                
-                                InjectDataTVA _
-                                    WsSource, _
-                                    WsDestination, _
-                                    LigneSource, _
-                                    LigneDestination, _
-                                    HeadersToInject, _
-                                    WkSource
-                                
+                            If LCase(Trim(CStr(NomTemplate))) = "tva" Then
+    
+                                InjectDataTVA WsSource, WsDestination, LigneSource, LigneDestination, HeadersToInject, WkSource
+    
                             Else
+    
+                                ' =================================
+                                ' STANDARD
+                                ' =================================
                                 
-                                ' =========================================
-                                ' TRAITEMENT STANDARD
-                                ' =========================================
-                                
-                                InjectDataStandard _
-                                    WsSource, _
-                                    WsDestination, _
-                                    LigneSource, _
-                                    LigneDestination, _
-                                    HeadersToInject, _
-                                    WkSource
-                                
-                                
+                                InjectDataStandard WsSource, WsDestination, LigneSource, LigneDestination, HeadersToInject, WkSource
+    
                             End If
     
                         End If
     
                     End If
-                    
+    
                 Next LigneSource
-                
+    
                 ' =================================================
-                ' ENREGISTREMENT DU FICHIER COLLABORATEUR
+                ' ENREGISTREMENT
                 ' =================================================
                 
                 WkDestination.Close SaveChanges:=True
-                                
+                
                 Set WsDestination = Nothing
                 Set WkDestination = Nothing
-                    
+    
             End If
-            
-        Next i
-
+    
+        Next NomTemplate
+    
+        Set WsSource = Nothing
+        Set FSO = Nothing
+    
     End Sub
-
+                    
 
     Sub InjectDataTVA( _
         ByVal WsSource As Worksheet, _
@@ -1682,41 +1745,28 @@ End Sub
         ' RECHERCHE TYPE DE TVA
         ' =========================================================
         
-        ColTypeTVA = GetColumnNumberByHeader( _
-            WsSource, _
-            "Type de TVA", _
-            1)
+        ColTypeTVA = GetColumnNumberByHeader(WsSource, "Type de TVA", 1)
         
         If ColTypeTVA = 0 Then
             
-            MsgBox _
-                "La colonne 'Type de TVA' est introuvable dans DIA.", _
+            MsgBox "La colonne 'Type de TVA' est introuvable dans DIA.", _
                 vbCritical
             
             End
             
         End If
         
-        TypeTVA = Trim(CStr( _
-            WsSource.Cells( _
-                LigneSource, _
-                ColTypeTVA _
-            ).Value _
-        ))
+        TypeTVA = Trim(CStr(WsSource.Cells(LigneSource, ColTypeTVA).Value))
         
         ' =========================================================
         ' RECHERCHE COLONNE MOIS DANS LE TEMPLATE TVA
         ' =========================================================
         
-        ColMois = GetTemplateColumnNumber( _
-            WsDestination, _
-            "mois")
+        ColMois = GetTemplateColumnNumber(WsDestination, "mois")
         
         If ColMois = 0 Then
             
-            MsgBox _
-                "La colonne 'mois' est introuvable dans le template TVA.", _
-                vbCritical
+            MsgBox "La colonne 'mois' est introuvable dans le template TVA.", vbCritical
             
             End
             
@@ -1759,47 +1809,27 @@ End Sub
                         
                         HeaderDia = Mid(HeaderTemplate, 5)
                         
-                        ColSource = GetColumnNumberByHeader( _
-                            WsSource, _
-                            HeaderDia, _
-                            1)
+                        ColSource = GetColumnNumberByHeader(WsSource, HeaderDia, 1)
                         
                         If ColSource = 0 Then
                             
-                            MsgBox _
-                                "Colonne DIA introuvable :" & vbCrLf & _
-                                HeaderDia & vbCrLf & vbCrLf & _
-                                "Fichier : " & WkSource.name, _
-                                vbCritical
+                            MsgBox "Colonne DIA introuvable :" & vbCrLf & HeaderDia & vbCrLf & vbCrLf & "Fichier : " & WkSource.name, vbCritical
                             
                             End
                             
                         End If
                         
-                        ColDestination = GetTemplateColumnNumber( _
-                            WsDestination, _
-                            HeaderTemplate)
+                        ColDestination = GetTemplateColumnNumber(WsDestination, HeaderTemplate)
                         
                         If ColDestination = 0 Then
                             
-                            MsgBox _
-                                "Colonne template introuvable :" & vbCrLf & _
-                                HeaderTemplate & vbCrLf & vbCrLf & _
-                                "Fichier : " & WsDestination.Parent.name, _
-                                vbCritical
+                            MsgBox "Colonne template introuvable :" & vbCrLf & HeaderTemplate & vbCrLf & vbCrLf & "Fichier : " & WsDestination.Parent.name, vbCritical
                             
                             End
                             
                         End If
                         
-                        WsDestination.Cells( _
-                            LigneDestination, _
-                            ColDestination _
-                        ).Value = _
-                            WsSource.Cells( _
-                                LigneSource, _
-                                ColSource _
-                            ).Value
+                        WsDestination.Cells(LigneDestination, ColDestination).Value = WsSource.Cells(LigneSource, ColSource).Value
                         
                     End If
                     
@@ -1811,14 +1841,9 @@ End Sub
             ' MOIS ASSOCIÉ
             ' =====================================================
             
-            MoisAAffecter = GetMoisTVA( _
-                TypeTVA, _
-                IndexDuplication)
+            MoisAAffecter = GetMoisTVA(TypeTVA, IndexDuplication)
             
-            WsDestination.Cells( _
-                LigneDestination, _
-                ColMois _
-            ).Value = MoisAAffecter
+            WsDestination.Cells(LigneDestination, ColMois).Value = MoisAAffecter
             
             LigneDestination = LigneDestination + 1
             
@@ -1906,8 +1931,7 @@ End Sub
     End Sub
     
 
-    Sub CentraliserDonneesCollaborateurs( _
-        ByVal DictPrincipal As Object, ByVal CheminDossierArchives As String)
+    Sub CentraliserDonneesCollaborateurs(ByVal DictPrincipal As Object, ByVal CheminDossierArchives As String)
 
         Dim FSO As Object
         
@@ -1945,24 +1969,15 @@ End Sub
         
         PathPrincipal = DictPrincipal("path_principal")
         
-        PathRacine = _
-            FSO.GetParentFolderName(PathPrincipal)
+        PathRacine = FSO.GetParentFolderName(PathPrincipal)
         
-        PathCollaborateurs = _
-            FSO.BuildPath( _
-                PathRacine, _
-                "collaborateurs" _
-            )
+        PathCollaborateurs = FSO.BuildPath(PathRacine, "collaborateurs")
         
         ' =========================================================
         ' FICHIER CENTRAL
         ' =========================================================
         
-        PathFichierCentral = _
-            FSO.BuildPath( _
-                CheminDossierArchives, _
-                "Centralisation.xlsx" _
-            )
+        PathFichierCentral = FSO.BuildPath(CheminDossierArchives, "Centralisation.xlsx")
         
         ' =========================================================
         ' OUVERTURE / CRÉATION DU FICHIER CENTRAL
@@ -2025,8 +2040,7 @@ End Sub
         ' Valeur = True si aucune source encore injectée
         ' =========================================================
         
-        Set DictPremiereSource = _
-            CreateObject("Scripting.Dictionary")
+        Set DictPremiereSource = CreateObject("Scripting.Dictionary")
         
         DictPremiereSource.CompareMode = vbTextCompare
         
@@ -2034,26 +2048,21 @@ End Sub
         ' PARCOURS DES TYPES DE COLLABORATEURS
         ' =========================================================
         
-        For Each DossierType In _
-            FSO.GetFolder(PathCollaborateurs).SubFolders
+        For Each DossierType In FSO.GetFolder(PathCollaborateurs).SubFolders
             
             ' =====================================================
             ' PARCOURS DES COLLABORATEURS
             ' =====================================================
             
-            For Each DossierCollaborateur In _
-                DossierType.SubFolders
+            For Each DossierCollaborateur In DossierType.SubFolders
                 
                 ' =================================================
                 ' PARCOURS DE TOUS LES FICHIERS
                 ' =================================================
                 
-                For Each Fichier In _
-                    DossierCollaborateur.Files
+                For Each Fichier In DossierCollaborateur.Files
                     
-                    
-                    NomFichierSansExtension = _
-                        FSO.GetBaseName(Fichier.name)
+                    NomFichierSansExtension = FSO.GetBaseName(Fichier.name)
                     
                     ' =================================================
                     ' ON IGNORE LES FICHIERS COMMENÇANT PAR suivi_
@@ -2068,7 +2077,7 @@ End Sub
                         ' LE NOM DU FICHIER DEVIENT LE NOM DE L'ONGLET
                         ' =============================================
                         
-                        NomOngletDestination = NomFichierSansExtension
+                        NomOngletDestination = GetNomTemplateDepuisFichier(Fichier.name, DossierCollaborateur.name)
                         
                         ' =============================================
                         ' CRÉATION DE L'ONGLET SI NÉCESSAIRE
@@ -2371,18 +2380,18 @@ End Sub
         
         ColCodeCentral = GetTemplateColumnNumber( _
             WsCentral, _
-            "DIA_Code du dossier" _
+            "DIA_Code du dossier DIA" _
         )
         
         ColCodeCollab = GetTemplateColumnNumber( _
             WsCollaborateur, _
-            "DIA_Code du dossier" _
+            "DIA_Code du dossier DIA" _
         )
 
         If ColCodeCentral = 0 Or ColCodeCollab = 0 Then
             
             MsgBox _
-                "La colonne 'DIA_Code du dossier' est introuvable." & _
+                "La colonne 'DIA_Code du dossier DIA' est introuvable." & _
                 vbCrLf & _
                 "Template : " & NomTemplate, _
                 vbCritical
@@ -2669,6 +2678,269 @@ End Sub
         Set FSO = Nothing
 
     End Sub
+    
+    
+    Sub ControleValeursCollaborateursDIA(ByRef ListeDossiers() As String, ByVal CheminDataDia As String)
+    
+        Dim FSO As Object
+        Dim WkDIA As Workbook
+        Dim WsDIA As Worksheet
+        
+        Dim Element As Variant
+        Dim NomColonne As String
+        
+        Dim ColonneDIA As Long
+        Dim DerniereLigne As Long
+        Dim Ligne As Long
+        
+        Dim NbManquants As Long
+        Dim TotalManquants As Long
+        
+        Dim Message As String
+        Dim WkDejaOuvert As Boolean
+        
+        Set FSO = CreateObject("Scripting.FileSystemObject")
+
+        ' =========================================================
+        ' OUVERTURE DU FICHIER DIA
+        ' =========================================================
+        
+        Set WkDIA = Nothing
+        
+        On Error Resume Next
+        Set WkDIA = Workbooks(FSO.GetFileName(CheminDataDia))
+        On Error GoTo 0
+        
+        If WkDIA Is Nothing Then
+            
+            Set WkDIA = Workbooks.Open(Filename:=CheminDataDia, ReadOnly:=True, UpdateLinks:=False, AddToMru:=False)
+            
+            WkDejaOuvert = False
+            
+        Else
+            
+            WkDejaOuvert = True
+            
+        End If
+        
+        Set WsDIA = WkDIA.Worksheets(1)
+        
+        DerniereLigne = DerniereLigneUtilisee(WsDIA)
+        
+        ' =========================================================
+        ' PARCOURS DE LA LISTE RETOURNÉE PAR GetSubFoldersList
+        ' =========================================================
+        
+        For Each Element In ListeDossiers
+
+            ' GetSubFoldersList retourne les chemins complets.
+            ' On récupère uniquement le nom du dossier.
+            
+            NomColonne = FSO.GetFileName(CStr(Element))
+
+            ' =====================================================
+            ' RECHERCHE DE LA COLONNE DANS LE DIA
+            ' =====================================================
+            
+            ColonneDIA = GetColumnNumberByHeader(WsDIA, NomColonne, 1)
+
+            ' =====================================================
+            ' COLONNE ABSENTE DU DIA
+            ' =====================================================
+            
+            If ColonneDIA = 0 Then
+                
+                Message = Message & "- " & NomColonne & " : COLONNE INTROUVABLE" & vbCrLf
+
+            Else
+                
+                ' =================================================
+                ' COMPTE LES VALEURS MANQUANTES
+                ' =================================================
+                
+                NbManquants = 0
+                
+                For Ligne = 2 To DerniereLigne
+                    
+                    If Trim(CStr(WsDIA.Cells(Ligne, ColonneDIA).Value)) = "" Then
+                        NbManquants = NbManquants + 1
+                    End If
+                    
+                Next Ligne
+                
+                ' =================================================
+                ' CONSTRUCTION DU RÉSULTAT
+                ' =================================================
+                
+                If NbManquants <> 0 Then
+
+                    Message = Message & "- " & NomColonne & " : " & NbManquants & " client(s) sans valeur" & vbCrLf
+                    
+                    TotalManquants = TotalManquants + NbManquants
+                    
+                End If
+
+            End If
+            
+        Next Element
+
+        ' =========================================================
+        ' TOTAL
+        ' =========================================================
+        
+        Message = Message & vbCrLf
+        
+        If TotalManquants <> 0 Then
+            
+            Message = Message & "Total : " & TotalManquants & " valeur(s) manquante(s)."
+            
+        End If
+
+        ' =========================================================
+        ' FERMETURE DU DIA
+        ' uniquement si le Sub l'a ouvert
+        ' =========================================================
+        
+        If Not WkDejaOuvert Then
+            WkDIA.Close SaveChanges:=False
+        End If
+        
+        Set WsDIA = Nothing
+        Set WkDIA = Nothing
+        Set FSO = Nothing
+
+        ' =========================================================
+        ' AFFICHAGE
+        ' =========================================================
+        
+        If TotalManquants <> 0 Then
+            MsgBox Message, vbExclamation, "Contrôle DIA"
+            End
+        End If
+    
+    End Sub
+    
+    
+    Sub ControleFichiersCollaborateursOuverts(ByVal DictPrincipal As Object)
+    
+        Dim FSO As Object
+        Dim CheminRacine As String
+        Dim CheminCollaborateurs As String
+        
+        Dim ListeFichiersOuverts As String
+        Dim NbFichiersOuverts As Long
+        
+        Set FSO = CreateObject("Scripting.FileSystemObject")
+        
+        ' =========================================================
+        ' CONSTRUCTION DU CHEMIN COLLABORATEURS
+        ' =========================================================
+        
+        PathPrincipal = DictPrincipal("path_principal")
+        PathRacine = FSO.GetParentFolderName(PathPrincipal)
+        PathCollaborateurs = FSO.BuildPath(PathRacine, "collaborateurs")
+        
+        ' =========================================================
+        ' RECHERCHE RÉCURSIVE
+        ' =========================================================
+        
+        ListeFichiersOuverts = ""
+        NbFichiersOuverts = 0
+        
+        ListerFichiersOuvertsRecursif PathCollaborateurs, ListeFichiersOuverts, NbFichiersOuverts
+        
+        ' =========================================================
+        ' RÉSULTAT
+        ' =========================================================
+        
+        If NbFichiersOuverts <> 0 Then
+            
+            MsgBox NbFichiersOuverts & " fichier(s) collaborateur(s) actuellement ouvert(s) :" & _
+                   vbCrLf & vbCrLf & _
+                   ListeFichiersOuverts, _
+                   vbExclamation, _
+                   "Fichiers collaborateurs ouverts"
+            End
+            
+        End If
+        
+        Set FSO = Nothing
+    
+    End Sub
+    
+    
+    Private Sub ListerFichiersOuvertsRecursif(ByVal CheminDossier As String, ByRef ListeFichiersOuverts As String, ByRef NbFichiersOuverts As Long)
+    
+        Dim FSO As Object
+        Dim Dossier As Object
+        Dim SousDossier As Object
+        Dim Fichier As Object
+        
+        Set FSO = CreateObject("Scripting.FileSystemObject")
+        Set Dossier = FSO.GetFolder(CheminDossier)
+        
+        ' =========================================================
+        ' FICHIERS DU DOSSIER
+        ' =========================================================
+        
+        For Each Fichier In Dossier.Files
+            
+            ' Ignore les fichiers temporaires créés par Excel : ~$...
+            If Left(Fichier.name, 2) <> "~$" Then
+                
+                If FichierEstOuvert(CStr(Fichier.path)) Then
+                    
+                    NbFichiersOuverts = NbFichiersOuverts + 1
+                    
+                    ListeFichiersOuverts = ListeFichiersOuverts & "- " & Fichier.path & vbCrLf
+                    
+                End If
+                
+            End If
+            
+        Next Fichier
+        
+        ' =========================================================
+        ' SOUS-DOSSIERS
+        ' =========================================================
+        
+        For Each SousDossier In Dossier.SubFolders
+            
+            ListerFichiersOuvertsRecursif SousDossier.path, ListeFichiersOuverts, NbFichiersOuverts
+            
+        Next SousDossier
+        
+        Set Dossier = Nothing
+        Set FSO = Nothing
+    
+    End Sub
+    
+    
+    Private Function FichierEstOuvert(ByVal CheminFichier As String) As Boolean
+    
+        Dim NumeroFichier As Integer
+        
+        NumeroFichier = FreeFile
+        
+        On Error Resume Next
+        
+        Open CheminFichier For Binary Access Read Write Lock Read Write As #NumeroFichier
+        
+        If Err.Number <> 0 Then
+            
+            FichierEstOuvert = True
+            Err.Clear
+            
+        Else
+            
+            FichierEstOuvert = False
+            Close #NumeroFichier
+            
+        End If
+        
+        On Error GoTo 0
+    
+    End Function
 
 ' =========================================================================
 ' LES SUB
